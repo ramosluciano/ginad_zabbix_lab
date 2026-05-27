@@ -1,0 +1,1 @@
+# ginad_zabbix_lab
