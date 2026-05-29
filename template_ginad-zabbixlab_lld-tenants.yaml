@@ -1,0 +1,191 @@
+zabbix_export:
+  version: '7.0'
+  template_groups:
+    - uuid: 03d79e86ae1d4d5c8f538e308348f727
+      name: 'Templates/GINAD Observability Lab'
+  templates:
+    - uuid: c1cfb15537ca45129a42b0d0053cf8e1
+      template: 'GINAD SaaS Tenants'
+      name: 'GINAD SaaS Tenants (HTTP Agent LLD)'
+      description: |
+        Template for monitoring GINAD SaaS tenants via HTTP Agent.
+        Discovers tenants via /admin/metrics/tenants LLD endpoint.
+        
+        Collects per tenant:
+        - Error rate (%)
+        - P95/P99 latency (ms)
+        - Requests per minute
+        - Active users
+        
+        Requires: HTTP Agent capable
+        Macro: {$LAB.BASE_URL} = http://localhost:8000
+      vendor:
+        name: 'GINAD Labs'
+        version: 1.0.0
+      groups:
+        - name: 'Templates/GINAD Observability Lab'
+      items:
+        - uuid: 205cba6d6ef9426cbe589ee72c0e1c5b
+          name: 'Média de taxa de erro nos tenants'
+          type: CALCULATED
+          key: avg_tenants_error_rate
+          value_type: FLOAT
+          params: 'avg(avg_foreach(//ginad.tenant.stats.error_rate[*],5m))'
+      discovery_rules:
+        - uuid: 74a8a33242664f579209ec6eeeeaeb2d
+          name: 'Discover Tenants from API'
+          type: HTTP_AGENT
+          key: ginad.tenants.discovery
+          delay: 60s
+          filter:
+            conditions:
+              - macro: '{#TENANT.NAME}'
+                value: Admin
+                operator: NOT_MATCHES_REGEX
+                formulaid: A
+          item_prototypes:
+            - uuid: 5646acfb31b641288e5929ace11ce236
+              name: 'Tenant {#TENANT.NAME} - Active Users'
+              type: DEPENDENT
+              key: 'ginad.tenant.stats.active_users[{#TENANT.ID}]'
+              delay: '0'
+              preprocessing:
+                - type: JSONPATH
+                  parameters:
+                    - $.active_users
+              master_item:
+                key: 'ginad.tenant.stats[{#TENANT.ID}]'
+            - uuid: fe81a8fffca2423e879eddf9e743a739
+              name: 'Tenant {#TENANT.NAME} - Average Latency (ms)'
+              type: DEPENDENT
+              key: 'ginad.tenant.stats.avg_latency[{#TENANT.ID}]'
+              delay: '0'
+              value_type: FLOAT
+              units: ms
+              preprocessing:
+                - type: JSONPATH
+                  parameters:
+                    - $.avg_latency_ms
+              master_item:
+                key: 'ginad.tenant.stats[{#TENANT.ID}]'
+            - uuid: 9bd6f111c01441c7b99e52fbf595557a
+              name: 'Tenant {#TENANT.NAME} - Error Rate (%)'
+              type: DEPENDENT
+              key: 'ginad.tenant.stats.error_rate[{#TENANT.ID}]'
+              delay: '0'
+              value_type: FLOAT
+              units: '%'
+              preprocessing:
+                - type: JSONPATH
+                  parameters:
+                    - $.error_rate
+              master_item:
+                key: 'ginad.tenant.stats[{#TENANT.ID}]'
+            - uuid: d41d46268caf41ef985ee0d2fd858f1a
+              name: 'Tenant {#TENANT.NAME} - P95 Latency (ms)'
+              type: DEPENDENT
+              key: 'ginad.tenant.stats.p95_latency[{#TENANT.ID}]'
+              delay: '0'
+              value_type: FLOAT
+              units: ms
+              preprocessing:
+                - type: JSONPATH
+                  parameters:
+                    - $.p95_latency_ms
+              master_item:
+                key: 'ginad.tenant.stats[{#TENANT.ID}]'
+              trigger_prototypes:
+                - uuid: 1e797bdcebdc446f834ec0b696f604f8
+                  expression: 'last(/GINAD SaaS Tenants/ginad.tenant.stats.p95_latency[{#TENANT.ID}]) > 2* avg(/GINAD SaaS Tenants/ginad.tenant.stats.p95_latency[{#TENANT.ID}], 1h)'
+                  name: 'GINAD: Latência elevada em tenant {#TENANT.NAME}'
+                  opdata: 'Problema: {ITEM.VALUE} Agora: {ITEM.LASTVALUE}'
+                  priority: AVERAGE
+                  description: 'P95 latency 2x acima da baseline (média 1 hora)'
+                  tags:
+                    - tag: Perormance
+                      value: Latência
+                    - tag: Tenant
+                      value: '{#TENANT.NAME}'
+            - uuid: f611cc408ab34261b7625c7673f4a0c4
+              name: 'Tenant {#TENANT.NAME} - P99 Latency (ms)'
+              type: DEPENDENT
+              key: 'ginad.tenant.stats.p99_latency[{#TENANT.ID}]'
+              delay: '0'
+              value_type: FLOAT
+              units: ms
+              preprocessing:
+                - type: JSONPATH
+                  parameters:
+                    - $.p99_latency_ms
+              master_item:
+                key: 'ginad.tenant.stats[{#TENANT.ID}]'
+            - uuid: 0f287dee2e494a97ab16e2b7d342cad7
+              name: 'Tenant {#TENANT.NAME} - Requests/min'
+              type: DEPENDENT
+              key: 'ginad.tenant.stats.req_per_min[{#TENANT.ID}]'
+              delay: '0'
+              value_type: FLOAT
+              units: '!requests'
+              preprocessing:
+                - type: JSONPATH
+                  parameters:
+                    - $.requests_per_min
+              master_item:
+                key: 'ginad.tenant.stats[{#TENANT.ID}]'
+              trigger_prototypes:
+                - uuid: f87c1e574bc84e65991d645d3da17cf1
+                  expression: 'count(/GINAD SaaS Tenants/ginad.tenant.stats.req_per_min[{#TENANT.ID}],#5,,0) > 4'
+                  name: 'GINAD: Falta de atividade detectada em tenant {#TENANT.NAME}'
+                  priority: AVERAGE
+                  description: 'Nenhuma requisição por mais de 5 minutos'
+                  tags:
+                    - tag: Negócio
+                      value: 'Falta de atividade'
+                    - tag: Tenant
+                      value: '{#TENANT.NAME}'
+                - uuid: 3ca117e989b648f2b5997131f19fc7b2
+                  expression: 'last(/GINAD SaaS Tenants/ginad.tenant.stats.req_per_min[{#TENANT.ID}]) > 10* avg(/GINAD SaaS Tenants/ginad.tenant.stats.req_per_min[{#TENANT.ID}], 1h)'
+                  name: 'GINAD: Tenant {#TENANT.NAME} com Requests por minuto muito acima da média'
+                  opdata: 'Problema: {ITEM.VALUE} Agora: {ITEM.LASTVALUE}'
+                  priority: HIGH
+                  description: 'Requests/min 10x acima da baseline (possível bot/ataque)'
+                  tags:
+                    - tag: Performance
+                      value: 'Excesso de requests'
+                    - tag: Tenant
+                      value: '{#TENANT.NAME}'
+            - uuid: 8e0cd90114914864ba425884957ca9b9
+              name: 'Tenant {#TENANT.NAME} - Stats'
+              type: HTTP_AGENT
+              key: 'ginad.tenant.stats[{#TENANT.ID}]'
+              delay: 10s
+              history: 1h
+              value_type: TEXT
+              trends: '0'
+              timeout: 3s
+              url: '{$LAB.BASE_URL}/api/v1/admin/metrics/tenants/{#TENANT.ID}/stats'
+          trigger_prototypes:
+            - uuid: a3fcddbb67f74731956a86a76313ce76
+              expression: 'last(/GINAD SaaS Tenants/ginad.tenant.stats.error_rate[{#TENANT.ID}]) > 3 * last(/GINAD SaaS Tenants/avg_tenants_error_rate)'
+              name: 'GINAD: Tenant {#TENANT.NAME} com taxa de erros muito acima da média'
+              opdata: 'Problema: {ITEM.VALUE} Agora: {ITEM.LASTVALUE}'
+              priority: HIGH
+              description: 'Error rate > 3 vezes a média de todos os tenants'
+              tags:
+                - tag: Performance
+                  value: Erros
+                - tag: Tenant
+                  value: '{#TENANT.NAME}'
+          timeout: 3s
+          url: '{$LAB.BASE_URL}/api/v1/admin/metrics/tenants'
+      tags:
+        - tag: class
+          value: application
+        - tag: target
+          value: ginad
+        - tag: target
+          value: saas-tenants
+      macros:
+        - macro: '{$LAB.BASE_URL}'
+          value: 'http://ginad-zabbixlab.monitoragindo.com.br:8000'
+          description: 'GINAD Lab API base URL'
